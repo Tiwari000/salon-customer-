@@ -1,0 +1,185 @@
+<!doctype html>
+<html lang="hi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SalonSmart AI</title>
+<style>
+  :root{--g:#176b50;--bg:#f5f7f4;--line:#e0e7e1;--txt:#18211f;--mut:#6b776f}
+  *{box-sizing:border-box}
+  body{margin:0;font-family:system-ui,Segoe UI,Arial,sans-serif;background:var(--bg);color:var(--txt)}
+  header{background:#fff;border-bottom:1px solid var(--line);padding:14px 18px;display:flex;justify-content:space-between;align-items:center}
+  header b{color:var(--g);font-size:20px}
+  header a{color:var(--g);text-decoration:none;font-size:14px;border:1px solid var(--line);padding:7px 12px;border-radius:8px}
+  main{max-width:900px;margin:0 auto;padding:18px}
+  h2{margin:22px 0 4px}
+  .sub{color:var(--mut);margin:0 0 14px;font-size:14px}
+  .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:14px}
+  .card{background:#fff;border:1px solid var(--line);border-radius:14px;padding:16px;cursor:pointer}
+  .card.sel{border:2px solid var(--g)}
+  .card h3{margin:0 0 4px}
+  .card p{margin:0 0 10px;color:var(--mut);font-size:13px}
+  .row{display:flex;justify-content:space-between;gap:8px;font-size:14px;margin:4px 0}
+  .tag{display:inline-block;font-size:11px;padding:3px 8px;border-radius:20px;background:#e4efe7;color:var(--g)}
+  .tag.off{background:#eee;color:#777}
+  .panel{background:#fff;border:1px solid var(--line);border-radius:14px;padding:18px;margin-top:16px}
+  .big{font-size:44px;font-weight:700;color:var(--g);line-height:1}
+  input,button{font:inherit}
+  input{width:100%;padding:12px;border:1px solid #d3dcd5;border-radius:9px;margin:6px 0}
+  button{background:var(--g);color:#fff;border:0;padding:12px 16px;border-radius:9px;font-weight:600;cursor:pointer}
+  button.light{background:#fff;color:var(--g);border:1px solid #cddbd2}
+  button:disabled{opacity:.5}
+  .msg{margin-top:10px;padding:10px 12px;border-radius:9px;background:#fdecea;color:#8a2a1f;display:none}
+  .my{border:2px solid var(--g)}
+  .status{font-size:18px;font-weight:700;margin:6px 0 12px}
+  .hide{display:none}
+  footer{text-align:center;color:#8a948d;font-size:12px;padding:26px}
+</style>
+</head>
+<body>
+<header><b>✂ SalonSmart AI</b><a href="/owner">Shop owner?</a></header>
+<main>
+
+  <div id="myBooking" class="panel my hide">
+    <span class="tag">AAPKI BOOKING</span>
+    <div id="myTitle" style="font-weight:700;font-size:18px;margin-top:8px"></div>
+    <div id="myAddr" class="sub"></div>
+    <div id="myStatus" class="status"></div>
+    <div id="myNumbers" class="row" style="justify-content:flex-start;gap:28px"></div>
+    <div style="margin-top:14px">
+      <button id="cancelBtn" class="light">Booking cancel karein</button>
+      <button id="newBtn" class="hide">Nayi booking</button>
+    </div>
+  </div>
+
+  <h2>Aas-paas ke salon</h2>
+  <p class="sub">Live status — har 5 second mein update hota hai. Time sirf anumaan hai, guarantee nahi.</p>
+  <div id="salons" class="grid"></div>
+
+  <div id="bookPanel" class="panel hide">
+    <span class="tag">SALON CHUNA</span>
+    <h2 id="selName" style="margin-top:8px"></h2>
+    <div id="selInfo" class="sub"></div>
+    <div class="row" style="justify-content:flex-start;gap:30px;align-items:flex-end">
+      <div><div class="big" id="selWait">–</div><div class="sub">minute anumaanit wait</div></div>
+      <div><div class="big" id="selPeople" style="font-size:30px">–</div><div class="sub">log shop mein (camera)</div></div>
+    </div>
+    <h3 style="margin-top:20px">Apna time book karein</h3>
+    <input id="bName" placeholder="Aapka naam" maxlength="60">
+    <input id="bPhone" placeholder="Mobile number (10 digit)" inputmode="numeric" maxlength="10">
+    <button id="bookBtn">Book karein</button>
+    <div id="bookMsg" class="msg"></div>
+  </div>
+</main>
+<footer>SalonSmart AI · Prototype · Estimated time guaranteed nahi hai</footer>
+
+<script>
+const $ = s => document.querySelector(s);
+const esc = t => String(t ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const store = {
+  get(k){ try{ return localStorage.getItem(k); }catch(e){ return null; } },
+  set(k,v){ try{ localStorage.setItem(k,v); }catch(e){} },
+  del(k){ try{ localStorage.removeItem(k); }catch(e){} }
+};
+async function api(path, opt = {}) {
+  const r = await fetch(path, {...opt, headers: {'Content-Type': 'application/json', ...(opt.headers || {})}});
+  let d = {}; try { d = await r.json(); } catch (e) {}
+  if (!r.ok) throw new Error(typeof d.detail === 'string' ? d.detail : 'Details check kijiye (naam aur 10 digit mobile number)');
+  return d;
+}
+
+let salons = [], selectedId = null, myId = store.get('salonsmart_booking'), lastStatus = null, notifiedNear = false;
+
+function renderSalons() {
+  $('#salons').innerHTML = salons.length ? salons.map(s => `
+    <div class="card ${s.id === selectedId ? 'sel' : ''}" data-id="${s.id}">
+      <div class="row"><h3>${esc(s.name)}</h3>
+        <span class="tag ${s.camera_live ? '' : 'off'}">${s.camera_live ? '● Camera live' : 'Camera off'}</span></div>
+      <p>${esc(s.address) || 'Pata add nahi hai'}</p>
+      <div class="row"><span>👥 Shop mein log</span><b>${s.people_in_shop ?? '—'}</b></div>
+      <div class="row"><span>📋 Booking waiting</span><b>${s.waiting_bookings}</b></div>
+      <div class="row"><span>⏱ Anumaanit wait</span><b>${s.est_wait} min</b></div>
+      <div class="row"><span>🕒 Naye customer ki turn</span><b>~${esc(s.est_time)}</b></div>
+      <div class="row"><span>💰 Rate</span><b>₹${s.price}</b></div>
+    </div>`).join('') : '<p class="sub">Abhi koi salon register nahi hai. Shop owner page se salon banayein.</p>';
+  const s = salons.find(x => x.id === selectedId);
+  if (s) {
+    $('#selName').textContent = s.name;
+    $('#selInfo').textContent = (s.address || '') + (s.phone ? ' · ' + s.phone : '');
+    $('#selWait').textContent = s.est_wait;
+    $('#selPeople').textContent = s.people_in_shop ?? '—';
+  }
+}
+async function loadSalons() {
+  try { salons = await api('/api/salons'); renderSalons(); } catch (e) { $('#salons').innerHTML = '<p class="sub">Server se connect nahi ho paya.</p>'; }
+}
+$('#salons').addEventListener('click', e => {
+  const c = e.target.closest('.card'); if (!c) return;
+  selectedId = Number(c.dataset.id);
+  $('#bookPanel').classList.remove('hide');
+  renderSalons();
+  $('#bookPanel').scrollIntoView({behavior: 'smooth'});
+});
+
+function showMsg(t) { const m = $('#bookMsg'); m.textContent = t; m.style.display = t ? 'block' : 'none'; }
+$('#bookBtn').addEventListener('click', async () => {
+  showMsg('');
+  if ('Notification' in window && Notification.permission === 'default') { try { Notification.requestPermission(); } catch (e) {} }
+  try {
+    const b = await api('/api/book', {method: 'POST', body: JSON.stringify({
+      salon_id: selectedId, name: $('#bName').value, phone: $('#bPhone').value})});
+    myId = b.id; store.set('salonsmart_booking', String(b.id));
+    lastStatus = null; notifiedNear = false;
+    $('#bookPanel').classList.add('hide');
+    renderBooking(b); window.scrollTo({top: 0, behavior: 'smooth'});
+    loadSalons();
+  } catch (e) { showMsg(e.message); }
+});
+
+const STATUS_TEXT = {
+  booked: 'Booking confirm ✅ Shop par samay se pahunchiye.',
+  arrived: 'Entry ho gayi ✅ Ab apni turn ka intezaar kijiye.',
+  serving: 'Aapki turn chal rahi hai ✂',
+  done: 'Service poori ho gayi. Dhanyavaad! 🙏',
+  cancelled: 'Booking cancel ho gayi.'
+};
+function notify(title, body) {
+  try { if (navigator.vibrate) navigator.vibrate([200, 100, 200]); } catch (e) {}
+  try { if ('Notification' in window && Notification.permission === 'granted') new Notification(title, {body}); } catch (e) {}
+}
+function renderBooking(b) {
+  $('#myBooking').classList.remove('hide');
+  $('#myTitle').textContent = b.salon_name;
+  $('#myAddr').textContent = (b.salon_address || '') + (b.salon_phone ? ' · ' + b.salon_phone : '');
+  $('#myStatus').textContent = STATUS_TEXT[b.status] || b.status;
+  const active = ['booked', 'arrived', 'serving'].includes(b.status);
+  $('#myNumbers').innerHTML = active && b.status !== 'serving'
+    ? `<div><div class="big">${b.position}</div><div class="sub">aapka number</div></div>
+       <div><div class="big">${b.est_wait}</div><div class="sub">minute (anumaan)</div></div>
+       <div><div class="big" style="font-size:30px">${esc(b.est_time)}</div><div class="sub">turn ka samay (anumaan)</div></div>` : '';
+  $('#cancelBtn').classList.toggle('hide', b.status !== 'booked');
+  $('#newBtn').classList.toggle('hide', active);
+  if (lastStatus !== null && lastStatus !== b.status) notify('SalonSmart AI', STATUS_TEXT[b.status] || b.status);
+  if (b.status === 'booked' && b.position <= 2 && !notifiedNear) {
+    notifiedNear = true; notify('Turn paas aa rahi hai', 'Aapki turn jaldi aane wali hai. Shop par pahunchiye!');
+  }
+  lastStatus = b.status;
+}
+async function pollBooking() {
+  if (!myId) return;
+  try { renderBooking(await api('/api/booking/' + myId)); }
+  catch (e) { if (/nahi mili/.test(e.message)) { store.del('salonsmart_booking'); myId = null; $('#myBooking').classList.add('hide'); } }
+}
+$('#cancelBtn').addEventListener('click', async () => {
+  if (!myId || !confirm('Booking cancel karein?')) return;
+  try { renderBooking(await api(`/api/booking/${myId}/cancel`, {method: 'POST'})); loadSalons(); } catch (e) {}
+});
+$('#newBtn').addEventListener('click', () => {
+  store.del('salonsmart_booking'); myId = null; $('#myBooking').classList.add('hide');
+});
+
+loadSalons(); pollBooking();
+setInterval(loadSalons, 5000); setInterval(pollBooking, 4000);
+</script>
+</body>
+</html>
